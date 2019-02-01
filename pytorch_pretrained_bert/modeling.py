@@ -930,19 +930,30 @@ class BertForRegression(PreTrainedBertModel):
     
     ```
     """
-    def __init__(self, config, output_layer_size=20):     #, num_labels=2):
+    def __init__(self, config, inner_layer_size=100, outer_layer_size=None):
         super(BertForRegression, self).__init__(config)
         #self.num_labels = num_labels
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.fc = nn.Linear(config.hidden_size, output_layer_size)
-        self.output = nn.Linear(output_layer_size, 1)
+        self.fc = nn.Linear(config.hidden_size, inner_layer_size)
+        self.fc2= nn.Linear(inner_layer_size, outer_layer_size) if outer_layer_size else None
+        last_layer_size = outer_layer_size if outer_layer_size else inner_layer_size
+        self.output = nn.Linear(last_layer_size, 1)
         self.apply(self.init_bert_weights)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
         _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
         pooled_output = self.dropout(pooled_output)
         fully_connected = nn.functional.relu(self.fc(pooled_output))
+        if self.fc2:
+            # print("here")
+            # print("\n")
+            fully_connected = self.dropout(fully_connected)
+            fully_connected = nn.functional.relu(self.fc2(fully_connected))
+        # else:
+        #     print("no")
+        #     print("\n")
+            
         val = self.output(fully_connected)
 
         if labels is not None:

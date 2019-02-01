@@ -19,7 +19,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import csv
 import os
 import logging
 import argparse
@@ -36,201 +35,13 @@ from pytorch_pretrained_bert.modeling import BertForRegression
 from pytorch_pretrained_bert.optimization import BertAdam
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 
+from helpers import *
+
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-class InputExample(object):
-    """A single training/test example for simple sequence pair comparison."""
-
-    def __init__(self, guid, text_a, text_b=None, score=None):
-        """Constructs a InputExample.
-
-        Args:
-            guid: Unique id for the example.
-            text_a: string. The untokenized text of the first sequence. For single
-            sequence tasks, only this sequence must be specified.
-            text_b: (Optional) string. The untokenized text of the second sequence.
-            Only must be specified for sequence pair tasks.
-            score: (Optional) number. The proximity score of the example. This should be
-            specified for train and dev examples, but not for test examples.
-        """
-        self.guid = guid
-        self.text_a = text_a
-        self.text_b = text_b
-        self.score = score
-
-
-class InputFeatures(object):
-    """A single set of features of data."""
-
-    def __init__(self, input_ids, input_mask, segment_ids, score):
-        self.input_ids = input_ids
-        self.input_mask = input_mask
-        self.segment_ids = segment_ids
-        self.score = score
-
-
-class DataProcessor(object):
-    """Base class for data converters for sequence classification data sets."""
-
-    def get_train_examples(self, data_dir):
-        """Gets a collection of `InputExample`s for the train set."""
-        raise NotImplementedError()
-
-    def get_dev_examples(self, data_dir):
-        """Gets a collection of `InputExample`s for the dev set."""
-        raise NotImplementedError()
-
-#     def get_labels(self):
-#         """Gets the list of labels for this data set."""
-#         raise NotImplementedError()
-
-    @classmethod
-    def _read_tsv(cls, input_file, quotechar=None):
-        """Reads a tab separated value file."""
-        with open(input_file, "r", encoding='utf-8') as f:
-            reader = csv.reader(f, delimiter="\t", quotechar=quotechar)
-            lines = []
-            for line in reader:
-                lines.append(line)
-            return lines
-
-
-class StsProcessor(DataProcessor):
-    """Processor for the MRPC data set (GLUE version)."""
-
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        logger.info("LOOKING AT {}".format(os.path.join(data_dir, "train.tsv")))
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
-
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
-
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        examples = []
-        for (i, line) in enumerate(lines):
-            if i == 0:
-                continue
-            guid = "%s-%s" % (set_type, i)
-            text_a = line[7]
-            text_b = line[8]
-            score = float(line[9])
-            examples.append(
-                InputExample(guid=guid, text_a=text_a, text_b=text_b, score=score))
-        return examples
-
-
-def convert_examples_to_features(examples, max_seq_length, tokenizer, verbose=False):
-    """Loads a data file into a list of `InputBatch`s."""
-
-    features = []
-    for (ex_index, example) in enumerate(examples):
-        tokens_a = tokenizer.tokenize(example.text_a)
-
-        tokens_b = None
-        if example.text_b:
-            tokens_b = tokenizer.tokenize(example.text_b)
-            # Modifies `tokens_a` and `tokens_b` in place so that the total
-            # length is less than the specified length.
-            # Account for [CLS], [SEP], [SEP] with "- 3"
-            _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - 3)
-        else:
-            # Account for [CLS] and [SEP] with "- 2"
-            if len(tokens_a) > max_seq_length - 2:
-                tokens_a = tokens_a[:(max_seq_length - 2)]
-
-        # The convention in BERT is:
-        # (a) For sequence pairs:
-        #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
-        #  type_ids: 0   0  0    0    0     0       0 0    1  1  1  1   1 1
-        # (b) For single sequences:
-        #  tokens:   [CLS] the dog is hairy . [SEP]
-        #  type_ids: 0   0   0   0  0     0 0
-        #
-        # Where "type_ids" are used to indicate whether this is the first
-        # sequence or the second sequence. The embedding vectors for `type=0` and
-        # `type=1` were learned during pre-training and are added to the wordpiece
-        # embedding vector (and position vector). This is not *strictly* necessary
-        # since the [SEP] token unambigiously separates the sequences, but it makes
-        # it easier for the model to learn the concept of sequences.
-        #
-        # For classification tasks, the first vector (corresponding to [CLS]) is
-        # used as as the "sentence vector". Note that this only makes sense because
-        # the entire model is fine-tuned.
-        tokens = ["[CLS]"] + tokens_a + ["[SEP]"]
-        segment_ids = [0] * len(tokens)
-
-        if tokens_b:
-            tokens += tokens_b + ["[SEP]"]
-            segment_ids += [1] * (len(tokens_b) + 1)
-
-        input_ids = tokenizer.convert_tokens_to_ids(tokens)
-
-        # The mask has 1 for real tokens and 0 for padding tokens. Only real
-        # tokens are attended to.
-        input_mask = [1] * len(input_ids)
-
-        # Zero-pad up to the sequence length.
-        padding = [0] * (max_seq_length - len(input_ids))
-        input_ids += padding
-        input_mask += padding
-        segment_ids += padding
-
-        assert len(input_ids) == max_seq_length
-        assert len(input_mask) == max_seq_length
-        assert len(segment_ids) == max_seq_length
-
-        if ex_index < 5 and verbose:
-            logger.info("*** Example ***")
-            logger.info("guid: %s" % (example.guid))
-            logger.info("tokens: %s" % " ".join(
-                    [str(x) for x in tokens]))
-            logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-            logger.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
-            logger.info(
-                    "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-            logger.info("score: %f" % (example.score))
-
-        features.append(
-                InputFeatures(input_ids=input_ids,
-                              input_mask=input_mask,
-                              segment_ids=segment_ids,
-                              score=example.score))
-    return features
-
-
-def _truncate_seq_pair(tokens_a, tokens_b, max_length):
-    """Truncates a sequence pair in place to the maximum length."""
-
-    # This is a simple heuristic which will always truncate the longer sequence
-    # one token at a time. This makes more sense than truncating an equal percent
-    # of tokens from each, since if one sequence is very short then each token
-    # that's truncated likely contains more information than a longer sequence.
-    while True:
-        total_length = len(tokens_a) + len(tokens_b)
-        if total_length <= max_length:
-            break
-        if len(tokens_a) > len(tokens_b):
-            tokens_a.pop()
-        else:
-            tokens_b.pop()
-
-def accuracy(out, scores):
-    outputs = np.abs(np.reshape(out, (-1,1)) - np.reshape(scores, (-1,1)))
-    return np.sum(outputs < 1)
-
-def warmup_linear(x, warmup=0.002):
-    if x < warmup:
-        return x/warmup
-    return 1.0 - x
 
 def main():
     parser = argparse.ArgumentParser()
@@ -284,6 +95,14 @@ def main():
                         default=5e-5,
                         type=float,
                         help="The initial learning rate for Adam.")
+    parser.add_argument("--layer1_size",
+                        default=100,
+                        type=int,
+                        help="First fc layer size")
+    parser.add_argument("--layer2_size",
+                        default=None,
+                        type=int,
+                        help="Second fc layer size")
     parser.add_argument("--num_train_epochs",
                         default=3.0,
                         type=float,
@@ -371,7 +190,7 @@ def main():
             len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps * args.num_train_epochs)
 
     # Prepare model
-    model = BertForRegression.from_pretrained(args.bert_model,
+    model = BertForRegression.from_pretrained(args.bert_model, inner_layer_size=args.layer1_size, outer_layer_size=args.layer2_size,
               cache_dir=PYTORCH_PRETRAINED_BERT_CACHE / 'distributed_{}'.format(args.local_rank))
     if args.fp16:
         model.half()
@@ -425,11 +244,11 @@ def main():
     def dev_eval(model, verbose=False):
         eval_examples = processor.get_dev_examples(args.data_dir)
         eval_features = convert_examples_to_features(
-            eval_examples, args.max_seq_length, tokenizer, verbose=verbose)
+            eval_examples, args.max_seq_length, tokenizer, logger=logger if verbose else None)
         all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
         all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
         all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-        all_scores = torch.tensor([f.score for f in eval_features], dtype=torch.long)
+        all_scores = torch.tensor([f.score for f in eval_features], dtype=torch.float)
         eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_scores)
         # Run prediction for full data
         eval_sampler = SequentialSampler(eval_data)
@@ -446,7 +265,7 @@ def main():
             scores = scores.to(device)
 
             with torch.no_grad():
-                tmp_eval_loss = model(input_ids, segment_ids, input_mask, scores.float())
+                tmp_eval_loss = model(input_ids, segment_ids, input_mask, scores)
                 logits = model(input_ids, segment_ids, input_mask)
 
             logits = logits.detach().cpu().numpy()
@@ -476,7 +295,7 @@ def main():
         
     if args.do_train:
         train_features = convert_examples_to_features(
-            train_examples, args.max_seq_length, tokenizer, verbose=True)
+            train_examples, args.max_seq_length, tokenizer, logger=logger)
         logger.info("***** Running training *****")
         logger.info("  Num examples = %d", len(train_examples))
         logger.info("  Batch size = %d", args.train_batch_size)
@@ -484,7 +303,7 @@ def main():
         all_input_ids = torch.tensor([f.input_ids for f in train_features], dtype=torch.long)
         all_input_mask = torch.tensor([f.input_mask for f in train_features], dtype=torch.long)
         all_segment_ids = torch.tensor([f.segment_ids for f in train_features], dtype=torch.long)
-        all_scores = torch.tensor([f.score for f in train_features], dtype=torch.long)
+        all_scores = torch.tensor([f.score for f in train_features], dtype=torch.float)
         train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_scores)
         if args.local_rank == -1:
             train_sampler = RandomSampler(train_data)
@@ -493,13 +312,13 @@ def main():
         train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
 
         model.train()
-        for _ in trange(int(args.num_train_epochs), desc="Epoch"):
+        for e in trange(int(args.num_train_epochs), desc="Epoch"):
             tr_loss = 0
             nb_tr_examples, nb_tr_steps = 0, 0
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
                 batch = tuple(t.to(device) for t in batch)
                 input_ids, input_mask, segment_ids, scores = batch
-                loss = model(input_ids, segment_ids, input_mask, scores.float())
+                loss = model(input_ids, segment_ids, input_mask, scores)
                 if n_gpu > 1:
                     loss = loss.mean() # mean() to average on multi-gpu.
                 if args.gradient_accumulation_steps > 1:
@@ -521,8 +340,7 @@ def main():
                     optimizer.step()
                     optimizer.zero_grad()
                     global_step += 1
-            print("Loss at epoch", _ ,tr_loss)
-            dev_eval(model)
+            logger.info("Loss at epoch %d: %f", e,tr_loss)
 
     # Save a trained model
     model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
@@ -532,64 +350,12 @@ def main():
 
     # Load a trained model that you have fine-tuned
     model_state_dict = torch.load(output_model_file)
-    model = BertForRegression.from_pretrained(args.bert_model, state_dict=model_state_dict)
+    model = BertForRegression.from_pretrained(args.bert_model, state_dict=model_state_dict, 
+        inner_layer_size=args.layer1_size, outer_layer_size=args.layer2_size)
     model.to(device)
 
     if args.do_eval and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         dev_eval(model, verbose=True)
-        # eval_examples = processor.get_dev_examples(args.data_dir)
-        # eval_features = convert_examples_to_features(
-        #     eval_examples, args.max_seq_length, tokenizer)
-        # logger.info("***** Running evaluation *****")
-        # logger.info("  Num examples = %d", len(eval_examples))
-        # logger.info("  Batch size = %d", args.eval_batch_size)
-        # all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-        # all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-        # all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-        # all_scores = torch.tensor([f.score for f in eval_features], dtype=torch.long)
-        # eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_scores)
-        # # Run prediction for full data
-        # eval_sampler = SequentialSampler(eval_data)
-        # eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
-
-        # model.eval()
-        # eval_loss, eval_accuracy = 0, 0
-        # nb_eval_steps, nb_eval_examples = 0, 0
- 
-        # for input_ids, input_mask, segment_ids, scores in tqdm(eval_dataloader, desc="Evaluating"):
-        #     input_ids = input_ids.to(device)
-        #     input_mask = input_mask.to(device)
-        #     segment_ids = segment_ids.to(device)
-        #     scores = scores.to(device)
-
-        #     with torch.no_grad():
-        #         tmp_eval_loss = model(input_ids, segment_ids, input_mask, scores.float())
-        #         logits = model(input_ids, segment_ids, input_mask)
-
-        #     logits = logits.detach().cpu().numpy()
-        #     scores = scores.to('cpu').numpy()
-        #     tmp_eval_accuracy = accuracy(logits, scores)
-
-        #     eval_loss += tmp_eval_loss.mean().item()
-        #     eval_accuracy += tmp_eval_accuracy
-
-        #     nb_eval_examples += input_ids.size(0)
-        #     nb_eval_steps += 1
-
-        # eval_loss = eval_loss / nb_eval_steps
-        # eval_accuracy = eval_accuracy #/ nb_eval_examples
-        # loss = tr_loss/nb_tr_steps if args.do_train else None
-        # result = {'eval_loss': eval_loss,
-        #           'eval_accuracy': eval_accuracy,
-        #           'global_step': global_step,
-        #           'loss': loss}
-
-        # output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
-        # with open(output_eval_file, "w") as writer:
-        #     logger.info("***** Eval results *****")
-        #     for key in sorted(result.keys()):
-        #         logger.info("  %s = %s", key, str(result[key]))
-        #         writer.write("%s = %s\n" % (key, str(result[key])))
-
+        
 if __name__ == "__main__":
     main()
