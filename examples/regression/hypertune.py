@@ -62,8 +62,9 @@ def build_model(hype_space, args, device):
     print(hype_space)
 
     # Prepare model
+    outer_layer_size = int(hype_space['one_more_fc']) if hype_space['one_more_fc'] else None
     model = BertForRegression.from_pretrained(args.bert_model, inner_layer_size=int(hype_space['fc_hiddn_units']),
-              outer_layer_size=hype_space['one_more_fc'],
+              outer_layer_size=outer_layer_size,
               cache_dir=PYTORCH_PRETRAINED_BERT_CACHE / 'distributed_{}'.format(args.local_rank)) 
               # max_position_embeddings=256, hidden_dropout_prob=hype_space['fc_dropout_prob'], 
               # num_hidden_layers=hype_space['num_hidden_layers'], hidden_act=hype_space['activation'])
@@ -106,7 +107,9 @@ def build_and_optimize(hype_space, args, device, train_data, train_sampler, eval
     ##TODO make this cleaner
     n_gpu = torch.cuda.device_count() 
     model.train()
-    for e in trange(int(args.num_train_epochs), desc="Epoch"):
+
+    tr_loss, epoch_num, prev_loss = 0, 0, np.float('inf')
+    for epoch_num in trange(int(args.num_train_epochs), desc="Epoch"):
         tr_loss = 0
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
         for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
@@ -133,7 +136,11 @@ def build_and_optimize(hype_space, args, device, train_data, train_sampler, eval
             optimizer.step()
             optimizer.zero_grad()
             global_step += 1
-        logger.info("Loss at epoch %d: %f",  e, tr_loss)
+
+        logger.info("Loss at epoch %d: %f",  epoch_num, tr_loss)
+        if (prev_loss - tr_loss)/prev_loss < args.tr_threshold:
+            break
+        prev_loss = tr_loss
 
     model.eval()
     eval_loss, eval_accuracy = 0, 0
@@ -162,6 +169,8 @@ def build_and_optimize(hype_space, args, device, train_data, train_sampler, eval
     eval_loss = eval_loss / nb_eval_steps
     results = {'eval_loss': eval_loss,
               'eval_accuracy': int(eval_accuracy),
+              'tr_loss': tr_loss,
+              'num_epochs': epoch_num+1,
               'global_step': global_step,
               'loss': -int(eval_accuracy),
               'status': STATUS_OK}
@@ -238,6 +247,10 @@ def main():
                         default=5e-5,
                         type=float,
                         help="The initial learning rate for Adam.")
+    parser.add_argument("--tr_threshold",
+                        default=0,
+                        type=float,
+                        help="The percent decrease in training loss at which we stop training.")
     parser.add_argument("--no_cuda",
                         action='store_true',
                         help="Whether not to use CUDA when available")
