@@ -946,14 +946,8 @@ class BertForRegression(PreTrainedBertModel):
         pooled_output = self.dropout(pooled_output)
         fully_connected = nn.functional.relu(self.fc(pooled_output))
         if self.fc2:
-            # print("here")
-            # print("\n")
             fully_connected = self.dropout(fully_connected)
             fully_connected = nn.functional.relu(self.fc2(fully_connected))
-        # else:
-        #     print("no")
-        #     print("\n")
-            
         val = self.output(fully_connected)
 
         if labels is not None:
